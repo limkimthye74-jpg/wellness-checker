@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wellness Checker | Live</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f0f4f8; 
+            color: #333; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            padding: 40px 20px; 
+            margin: 0;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 30px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        h2 { color: #2c3e50; margin-top: 0; }
+        .role-selector { margin-bottom: 20px; }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin: 5px;
+        }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
+        #log-btn { background-color: #27ae60; display: none; }
+        
+        #video-container { 
+            margin: 20px auto; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            border: 3px solid #ecf0f1; 
+            width: 300px; 
+            height: 300px; 
+            background-color: #000;
+            display: none;
+            position: relative;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        
+        #advice-container { 
+            margin-top: 20px; 
+            padding: 20px; 
+            font-size: 18px; 
+            border-radius: 8px; 
+            background-color: #ecf0f1; 
+            transition: background 0.5s;
+        }
+        .footer { margin-top: 30px; font-size: 14px; color: #7f8c8d; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Daily Wellness Check-in</h2>
+        
+        <div class="role-selector">
+            <label><input type="radio" name="role" value="Student" checked> Student</label>
+            <label style="margin-left: 15px;"><input type="radio" name="role" value="Staff"> Staff</label>
+        </div>
+
+        <button type="button" onclick="init()" id="start-btn">Start Camera</button>
+        
+        <div id="video-container">
+            <video id="webcam" autoplay muted playsinline></video>
+        </div>
+        
+        <div id="advice-container">Select your role and click "Start Camera" to begin.</div>
+        
+        <button type="button" onclick="logCheckIn()" id="log-btn">Submit My Check-in</button>
+    </div>
+
+    <div class="footer">Passionate Learner, Gracious citizen</div>
+
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <script type="text/javascript">
+        const video = document.getElementById('webcam');
+        let currentEmotion = "Neutral"; 
+        let detectionInterval;
+
+        // --- REPLACE THIS URL WITH YOUR GOOGLE SCRIPT EXEC URL ---
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz.../exec"; 
+
+        async function init() {
+            const startBtn = document.getElementById("start-btn");
+            const adviceDiv = document.getElementById("advice-container");
+            
+            startBtn.disabled = true;
+            startBtn.innerHTML = "Loading AI...";
+            adviceDiv.innerHTML = "Initializing camera and AI models...";
+
+            const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+            
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+                ]);
+                startCamera();
+            } catch (error) {
+                adviceDiv.innerHTML = "Error loading AI models. Check your connection.";
+                console.error(error);
+            }
+        }
+
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    video.srcObject = stream;
+                    document.getElementById("start-btn").style.display = "none";
+                    document.getElementById("video-container").style.display = "block";
+                    document.getElementById("log-btn").style.display = "inline-block";
+                    document.getElementById("advice-container").innerHTML = "Analyzing expression...";
+
+                    video.addEventListener('play', () => {
+                        detectionInterval = setInterval(async () => {
+                            const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceExpressions();
+                            if (detections) {
+                                parseExpressions(detections.expressions);
+                            } else {
+                                document.getElementById("advice-container").innerHTML = "Face not detected. Please center your face.";
+                            }
+                        }, 500);
+                    });
+                })
+                .catch(err => {
+                    document.getElementById("advice-container").innerHTML = "Camera Error: " + err.message;
+                    document.getElementById("advice-container").style.backgroundColor = "#ff7675";
+                });
+        }
+
+        function parseExpressions(expressions) {
+            const targetEmotions = {
+                "Angry": expressions.angry,
+                "Sad": expressions.sad,
+                "Happy": expressions.happy,
+                "Neutral": expressions.neutral
+            };
+
+            let highestProb = 0;
+            let detected = "Neutral";
+
+            for (const [emo, prob] of Object.entries(targetEmotions)) {
+                if (prob > highestProb) {
+                    highestProb = prob;
+                    detected = emo;
+                }
+            }
+
+            if (highestProb > 0.40) {
+                currentEmotion = detected;
+                displayAdvice(currentEmotion);
+            }
+        }
+
+        function displayAdvice(emotion) {
+            const adviceDiv = document.getElementById("advice-container");
+            const role = document.querySelector('input[name="role"]:checked').value;
+            
+            if (emotion === "Angry") {
+                adviceDiv.style.backgroundColor = "#ff7675";
+                adviceDiv.innerHTML = "Take a deep breath. A quick reset can work wonders.";
+            } else if (emotion === "Sad") {
+                adviceDiv.style.backgroundColor = "#dfe6e9";
+                adviceDiv.innerHTML = "It's okay to feel down. Be kind to yourself today.";
+            } else if (emotion === "Happy") {
+                adviceDiv.style.backgroundColor = "#55efc4";
+                adviceDiv.innerHTML = "Great energy! Keep spreading that positivity.";
+            } else {
+                adviceDiv.style.backgroundColor = "#ecf0f1";
+                adviceDiv.innerHTML = "Ready for a great day ahead!";
+            }
+        }
+
+        async function logCheckIn() {
+            const role = document.querySelector('input[name="role"]:checked').value;
+            const btn = document.getElementById("log-btn");
+            
+            btn.innerHTML = "Logging...";
+            btn.disabled = true;
+
+            const payload = {
+                emotion: currentEmotion,
+                role: role
+            };
+
+            // Using fetch to talk to Google Apps Script
+            try {
+                await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // Critical for cross-domain Google Scripts
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                btn.innerHTML = "Check-in Logged!";
+                setTimeout(() => { btn.innerHTML = "Submit My Check-in"; btn.disabled = false; }, 3000);
+            } catch (error) {
+                console.error("Logging Error:", error);
+                btn.innerHTML = "Retry Check-in";
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
